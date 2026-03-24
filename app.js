@@ -13,6 +13,7 @@ const nameCollator = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: "base",
 });
+const PRIMARY_SHORTCUT_KEY = detectPrimaryShortcutKey();
 
 let dbPromise = null;
 let mermaidInitialized = false;
@@ -20,6 +21,8 @@ let dragDepth = 0;
 let activeMermaidPan = null;
 let activeSidebarResize = null;
 let activeMermaidDiagramKey = null;
+let lastRenderedSelectionKey = null;
+let lastRenderedMarkdown = null;
 
 const elements = {
   appShell: document.getElementById("app-shell"),
@@ -28,6 +31,7 @@ const elements = {
   content: document.getElementById("content"),
   mainContent: document.getElementById("main-content"),
   pickerMenu: document.getElementById("picker-menu"),
+  pickerSummary: document.querySelector("#picker-menu > summary"),
   openFileButton: document.getElementById("open-file-button"),
   openFolderButton: document.getElementById("open-folder-button"),
   fileInput: document.getElementById("file-input"),
@@ -49,6 +53,7 @@ if (document.readyState === "loading") {
 
 function init() {
   configureLibraries();
+  configureTooltips();
   bindEvents();
   applyShellState();
   elements.sortMode.value = state.sortMode;
@@ -184,6 +189,61 @@ function bindDropZone() {
     elements.dropZone.classList.remove("is-drag-over");
     void handleDrop(event);
   });
+}
+
+function detectPrimaryShortcutKey() {
+  const platform = [
+    window.navigator?.userAgentData?.platform,
+    window.navigator?.platform,
+    window.navigator?.userAgent,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return /mac|iphone|ipad|ipod/.test(platform) ? "Cmd" : "Ctrl";
+}
+
+function formatShortcutLabel(parts) {
+  if (!parts) {
+    return "";
+  }
+
+  const normalizedParts = Array.isArray(parts) ? parts : [parts];
+  return normalizedParts
+    .map((part) => (part === "Mod" ? PRIMARY_SHORTCUT_KEY : part))
+    .join(" + ");
+}
+
+function buildTooltipLabel(label, shortcut) {
+  return shortcut ? `${label} (${shortcut})` : label;
+}
+
+function applyTooltip(element, label, shortcutParts = null) {
+  if (!element) {
+    return;
+  }
+
+  const shortcut =
+    typeof shortcutParts === "string"
+      ? shortcutParts
+      : formatShortcutLabel(shortcutParts);
+
+  element.title = buildTooltipLabel(label, shortcut);
+}
+
+function configureTooltips() {
+  applyTooltip(
+    elements.pickerSummary,
+    "Open files or folders",
+    `${formatShortcutLabel(["Mod", "O"])} / ${formatShortcutLabel(["Mod", "Shift", "O"])}`,
+  );
+  applyTooltip(elements.openFileButton, "Open files", ["Mod", "O"]);
+  applyTooltip(elements.openFolderButton, "Open folder", ["Mod", "Shift", "O"]);
+  applyTooltip(elements.sortMode, "Sort navigation items");
+  applyTooltip(elements.collapseToggle, "Collapse sidebar", ["Mod", "\\"]);
+  applyTooltip(elements.sidebarRestore, "Expand sidebar", ["Mod", "\\"]);
+  applyTooltip(elements.sidebarResizer, "Resize sidebar");
 }
 
 function hasFilePayload(event) {
@@ -724,6 +784,10 @@ function renderFolderItem(item) {
     "aria-label",
     item.expanded ? "Collapse folder" : "Expand folder",
   );
+  applyTooltip(
+    toggleButton,
+    item.expanded ? "Collapse folder" : "Expand folder",
+  );
   toggleButton.appendChild(createChevronIcon(item.expanded));
   toggleButton.addEventListener("click", () => {
     item.expanded = !item.expanded;
@@ -842,6 +906,12 @@ function renderNestedFolderNode(item, node) {
   toggle.className = "folder-toggle tree-toggle";
   toggle.setAttribute(
     "aria-label",
+    isNestedFolderExpanded(item, node.path)
+      ? "Collapse folder"
+      : "Expand folder",
+  );
+  applyTooltip(
+    toggle,
     isNestedFolderExpanded(item, node.path)
       ? "Collapse folder"
       : "Expand folder",
@@ -989,6 +1059,7 @@ function createRemoveButton(onClick) {
   button.className = "remove-button";
   button.textContent = "x";
   button.setAttribute("aria-label", "Remove item");
+  applyTooltip(button, "Remove item");
   button.addEventListener("click", onClick);
   return button;
 }
@@ -1253,17 +1324,29 @@ async function refreshOnFocus() {
   await refreshStoredItems({ requestPermission: false });
   renderSidebar();
 
-  if (state.selectedKey) {
-    const maybeContent = await readSelectionContent(state.selectedKey, {
+  const selectionKey = state.selectedKey;
+  if (selectionKey) {
+    const maybeContent = await readSelectionContent(selectionKey, {
       requestPermission: false,
     });
 
-    if (maybeContent) {
-      await renderMarkdown(maybeContent.markdown);
+    if (selectionKey !== state.selectedKey) {
       return;
     }
 
-    renderUnavailableState(state.selectedKey);
+    if (maybeContent) {
+      if (
+        lastRenderedSelectionKey === selectionKey &&
+        lastRenderedMarkdown === maybeContent.markdown
+      ) {
+        return;
+      }
+
+      await renderMarkdown(maybeContent.markdown, { preserveScroll: true });
+      return;
+    }
+
+    renderUnavailableState(selectionKey);
   }
 }
 
@@ -1552,7 +1635,11 @@ async function readFolderChildContent(item, child, options = {}) {
   }
 }
 
-async function renderMarkdown(markdown) {
+async function renderMarkdown(markdown, options = {}) {
+  const scrollTop = options.preserveScroll
+    ? elements.mainContent.scrollTop
+    : 0;
+
   clearMermaidPanState();
   clearActiveMermaidCard();
   const html = window.marked ? window.marked.parse(markdown) : escapeHtml(markdown);
@@ -1561,17 +1648,24 @@ async function renderMarkdown(markdown) {
     : html;
 
   elements.content.innerHTML = safeHtml;
-  elements.mainContent.scrollTop = 0;
   await hydrateMermaidBlocks(elements.content);
+  elements.mainContent.scrollTop = scrollTop;
+  lastRenderedSelectionKey = state.selectedKey;
+  lastRenderedMarkdown = markdown;
 }
 
 function renderWelcomeState(message) {
+  clearMermaidPanState();
+  clearActiveMermaidCard();
   elements.content.innerHTML = `
     <div class="empty-state">
       <h1>Markdown Viewer</h1>
       <p>${escapeHtml(message || "Open a Markdown file or folder from the left sidebar.")}</p>
     </div>
   `;
+  elements.mainContent.scrollTop = 0;
+  lastRenderedSelectionKey = null;
+  lastRenderedMarkdown = null;
 }
 
 function renderUnavailableState(selectionKey) {
@@ -1579,12 +1673,17 @@ function renderUnavailableState(selectionKey) {
   const item = state.items.find((entry) => entry.id === itemId);
   const targetName = relativePath || item?.name || "This item";
 
+  clearMermaidPanState();
+  clearActiveMermaidCard();
   elements.content.innerHTML = `
     <div class="empty-state">
       <h2>${escapeHtml(targetName)}</h2>
       <p>This file is no longer available or access was not granted.</p>
     </div>
   `;
+  elements.mainContent.scrollTop = 0;
+  lastRenderedSelectionKey = null;
+  lastRenderedMarkdown = null;
 }
 
 async function hydrateMermaidBlocks(container) {
@@ -1631,6 +1730,7 @@ function createMermaidCard(source, diagramKey) {
   zoomOut.className = "mermaid-button";
   zoomOut.dataset.zoom = "out";
   zoomOut.textContent = "-";
+  applyTooltip(zoomOut, "Zoom out", ["-"]);
   toolbar.appendChild(zoomOut);
 
   const scaleLabel = document.createElement("button");
@@ -1638,6 +1738,7 @@ function createMermaidCard(source, diagramKey) {
   scaleLabel.className = "mermaid-button scale-label";
   scaleLabel.dataset.zoom = "reset";
   scaleLabel.textContent = "100%";
+  applyTooltip(scaleLabel, "Reset zoom", ["0"]);
   toolbar.appendChild(scaleLabel);
 
   const zoomIn = document.createElement("button");
@@ -1645,6 +1746,7 @@ function createMermaidCard(source, diagramKey) {
   zoomIn.className = "mermaid-button";
   zoomIn.dataset.zoom = "in";
   zoomIn.textContent = "+";
+  applyTooltip(zoomIn, "Zoom in", ["+"]);
   toolbar.appendChild(zoomIn);
 
   const viewport = document.createElement("div");
