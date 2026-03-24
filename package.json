@@ -1,0 +1,12 @@
+{
+  "name": "ultimate-md-viewer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pure HTML/CSS/JS markdown viewer",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "dompurify": "^3.3.3",
+    "marked": "^17.0.5",
+    "mermaid": "^11.13.0"
+  }
+}
