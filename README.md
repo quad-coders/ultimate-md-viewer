@@ -23,6 +23,7 @@ The app is designed to stay simple:
 - Remember Mermaid zoom per diagram
 - Resize the sidebar and remember its width
 - Work offline using local vendored browser libraries
+- Send page-view analytics when the app is deployed on Vercel
 
 ## How To Use
 
@@ -92,22 +93,40 @@ For file-system-backed items, the app also stores file and folder handles in Ind
 
 That allows refresh to keep your sidebar without immediately losing all opened items.
 
+## Vercel Analytics
+
+The app includes Vercel Web Analytics for hosted deployments.
+
+How it works:
+- `index.html` defines the `window.va` queue function
+- `index.html` loads `/_vercel/insights/script.js`
+- page views are tracked automatically when the site is deployed on Vercel with Web Analytics enabled
+
+Important behavior:
+- opening [index.html](/Users/suhi/Downloads/Repo/ultimate-md-viewer/index.html) directly still works for the viewer itself
+- the analytics script is only expected to resolve on a Vercel deployment
+- if you host the app somewhere else, the analytics endpoint will not be available unless you add an equivalent integration for that platform
+
 ## What `package.json` Is For
 
 This project runs as plain static files in the browser. It does not need `npm start`, a bundler, or a server to run.
 
-`package.json` is here for one reason:
-- to track the versions of the browser libraries that were copied into `vendor/`
+`package.json` is here to track project dependencies.
 
-Those libraries are:
+Vendored browser libraries:
 - `dompurify`
 - `marked`
 - `mermaid`
+
+Hosted integration dependency:
+- `@vercel/analytics`
 
 At runtime, the app loads the local files in [vendor](/Users/suhi/Downloads/Repo/ultimate-md-viewer/vendor), not `node_modules`.
 
 So:
 - `vendor/` is used by the app
+- the Markdown and Mermaid runtime libraries are loaded from local vendored files
+- Vercel Analytics is loaded by the script tag in [index.html](/Users/suhi/Downloads/Repo/ultimate-md-viewer/index.html#L1)
 - `package.json` and `package-lock.json` are used for dependency version tracking and future updates
 - `node_modules/` is only a local install directory and is not needed to run the viewer
 
@@ -130,13 +149,15 @@ Current vendored files:
 
 3. Commit the updated `vendor/` files and lockfile
 
+If you are only updating Vercel Analytics, there are no vendored files to copy. Updating `package.json` and `package-lock.json` is enough.
+
 ## Project Files
 
-- [index.html](/Users/suhi/Downloads/Repo/ultimate-md-viewer/index.html): page structure and library loading
+- [index.html](/Users/suhi/Downloads/Repo/ultimate-md-viewer/index.html): page structure, vendored library loading, and Vercel Analytics script tags
 - [styles.css](/Users/suhi/Downloads/Repo/ultimate-md-viewer/styles.css): layout and visual styling
 - [app.js](/Users/suhi/Downloads/Repo/ultimate-md-viewer/app.js): viewer logic, state, file handling, Mermaid behavior
 - [vendor](/Users/suhi/Downloads/Repo/ultimate-md-viewer/vendor): local browser dependencies used at runtime
-- [package.json](/Users/suhi/Downloads/Repo/ultimate-md-viewer/package.json): dependency metadata for vendored libraries
+- [package.json](/Users/suhi/Downloads/Repo/ultimate-md-viewer/package.json): dependency metadata for vendored libraries and Vercel Analytics
 - [package-lock.json](/Users/suhi/Downloads/Repo/ultimate-md-viewer/package-lock.json): exact dependency lockfile
 
 ## Notes
